@@ -3,10 +3,16 @@ import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
+import httpx
+
 from .agent import Agent
 from .config import Config
 from .docker import DockerClient
 from .registry import AgentRegistry
+
+
+class DelegationError(Exception):
+    pass
 
 _GOALS_HEADER = "## Orchestrator Goals"
 _NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9\-]*[a-z0-9])?$")
@@ -119,6 +125,48 @@ class AgentManager:
 
         agent.goals = []
         self.registry.update(agent)
+
+    # ── delegation ────────────────────────────────────────────────────────────
+
+    def delegate_task(self, agent_name: str, message: str) -> dict:
+        """
+        Send a task to a sub-agent's Hermes gateway and return the response.
+
+        Posts to the agent's OpenAI-compatible /v1/chat/completions endpoint
+        and blocks until the agent replies or the 120s timeout expires.
+        Raises DelegationError on network failure or non-2xx response.
+        """
+        agent = self.get_agent(agent_name)
+        try:
+            with httpx.Client(timeout=120) as client:
+                resp = client.post(
+                    f"{agent.gateway_url}/v1/chat/completions",
+                    json={
+                        "model": "hermes",
+                        "messages": [{"role": "user", "content": message}],
+                    },
+                )
+                resp.raise_for_status()
+                return resp.json()
+        except httpx.HTTPStatusError as e:
+            raise DelegationError(
+                f"Agent '{agent_name}' returned {e.response.status_code}"
+            ) from e
+        except httpx.RequestError as e:
+            raise DelegationError(
+                f"Could not reach agent '{agent_name}': {e}"
+            ) from e
+
+    def routing_candidates(self) -> list[dict]:
+        """
+        Return all active agents as routing candidates for the orchestrator.
+        Each entry contains the name, summary, and gateway_url so the
+        orchestrator can decide which agent to delegate to.
+        """
+        return [
+            {"name": a.name, "summary": a.summary, "gateway_url": a.gateway_url}
+            for a in self.registry.all_active()
+        ]
 
     # ── helpers ───────────────────────────────────────────────────────────────
 

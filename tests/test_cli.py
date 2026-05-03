@@ -8,6 +8,9 @@ from click.testing import CliRunner
 from orchestrator.agent import Agent
 from orchestrator.cli import cli
 
+# Patch target for the init guard used by start / agent add
+_INIT_GUARD = "orchestrator.cli.already_initialized"
+
 
 @pytest.fixture
 def runner() -> CliRunner:
@@ -40,23 +43,32 @@ def _mock_manager(agent: Agent | None = None) -> MagicMock:
 
 class TestStart:
     def test_calls_start_orchestrator(self, runner: CliRunner):
-        with patch("orchestrator.cli._manager") as mock_get:
+        with patch(_INIT_GUARD, return_value=True), \
+             patch("orchestrator.cli._manager") as mock_get:
             mock_get.return_value = _mock_manager()
             result = runner.invoke(cli, ["start"])
         assert result.exit_code == 0
 
     def test_shows_url_on_success(self, runner: CliRunner):
-        with patch("orchestrator.cli._manager") as mock_get:
+        with patch(_INIT_GUARD, return_value=True), \
+             patch("orchestrator.cli._manager") as mock_get:
             mock_get.return_value = _mock_manager()
             result = runner.invoke(cli, ["start"])
         assert "8642" in result.output
+
+    def test_exits_1_when_not_initialized(self, runner: CliRunner):
+        with patch(_INIT_GUARD, return_value=False):
+            result = runner.invoke(cli, ["start"])
+        assert result.exit_code == 1
+        assert "orchestrator init" in result.output
 
 
 # ── agent add ──────────────────────────────────────────────────────────────────
 
 class TestAgentAdd:
     def test_success(self, runner: CliRunner, agent: Agent):
-        with patch("orchestrator.cli._manager") as mock_get:
+        with patch(_INIT_GUARD, return_value=True), \
+             patch("orchestrator.cli._manager") as mock_get:
             m = _mock_manager(agent)
             m.add_agent.return_value = agent
             mock_get.return_value = m
@@ -68,7 +80,8 @@ class TestAgentAdd:
         assert "9000" in result.output
 
     def test_prompts_for_summary_when_omitted(self, runner: CliRunner, agent: Agent):
-        with patch("orchestrator.cli._manager") as mock_get:
+        with patch(_INIT_GUARD, return_value=True), \
+             patch("orchestrator.cli._manager") as mock_get:
             m = _mock_manager(agent)
             m.add_agent.return_value = agent
             mock_get.return_value = m
@@ -78,7 +91,8 @@ class TestAgentAdd:
         assert result.exit_code == 0
 
     def test_exits_1_on_duplicate(self, runner: CliRunner):
-        with patch("orchestrator.cli._manager") as mock_get:
+        with patch(_INIT_GUARD, return_value=True), \
+             patch("orchestrator.cli._manager") as mock_get:
             m = _mock_manager()
             m.add_agent.side_effect = ValueError("already exists")
             mock_get.return_value = m
@@ -89,7 +103,8 @@ class TestAgentAdd:
         assert "already exists" in result.output
 
     def test_exits_1_on_invalid_name(self, runner: CliRunner):
-        with patch("orchestrator.cli._manager") as mock_get:
+        with patch(_INIT_GUARD, return_value=True), \
+             patch("orchestrator.cli._manager") as mock_get:
             m = _mock_manager()
             m.add_agent.side_effect = ValueError("Invalid agent name")
             mock_get.return_value = m
@@ -97,6 +112,14 @@ class TestAgentAdd:
                 cli, ["agent", "add", "Bad Name", "--summary", "test"]
             )
         assert result.exit_code == 1
+
+    def test_exits_1_when_not_initialized(self, runner: CliRunner):
+        with patch(_INIT_GUARD, return_value=False):
+            result = runner.invoke(
+                cli, ["agent", "add", "test-agent", "--summary", "test"]
+            )
+        assert result.exit_code == 1
+        assert "orchestrator init" in result.output
 
 
 # ── agent remove ───────────────────────────────────────────────────────────────
