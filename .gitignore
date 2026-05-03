@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.egg-info/
+dist/
+build/
+
+# Runtime state — created by `orchestrator init` / `orchestrator agent add`
+agents/
+registry.json
+.hermes-initialized
+
+# Hermes orchestrator profile
+.hermes-orchestrator/
+
+# Scratch / sandbox
+sandbox/
+
+# Test coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Claude Code local settings (machine-specific)
+.claude/settings.local.json
+
+# macOS
+.DS_Store

@@ -1,0 +1,7 @@
+# Hermes Team configuration
+# All fields are optional — defaults shown as comments.
+
+# image: nousresearch/hermes-agent:latest
+# orchestrator_name: hermes-orchestrator
+# orchestrator_port: 8642
+# agent_base_port: 8650

@@ -1,0 +1,18 @@
+services:
+  orchestrator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: bucees-hermes:latest
+    container_name: hermes-orchestrator
+    restart: unless-stopped
+    command: gateway run
+    ports:
+      - "8642:8642"
+    volumes:
+      - ~/.hermes-orchestrator:/opt/data
+      - /var/run/docker.sock:/var/run/docker.sock
+      - .:/workspace
+    environment:
+      - PROJECT_DIR=/workspace
+    shm_size: "3g"

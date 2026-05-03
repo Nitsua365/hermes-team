@@ -1,0 +1,18 @@
+services:
+  orchestrator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: {image_name}
+    container_name: {container_name}
+    restart: unless-stopped
+    command: gateway run
+    ports:
+      - "{port}:8642"
+    volumes:
+      - {profile_dir}:/opt/data
+      - /var/run/docker.sock:/var/run/docker.sock
+      - .:/workspace
+    environment:
+      - PROJECT_DIR=/workspace
+    shm_size: "3g"

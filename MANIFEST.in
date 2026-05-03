@@ -1,0 +1,3 @@
+recursive-include orchestrator/scaffold *
+exclude orchestrator/scaffold/__pycache__
+exclude orchestrator/scaffold/*.pyc
