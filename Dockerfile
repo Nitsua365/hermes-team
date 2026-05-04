@@ -1,5 +1,8 @@
 FROM nousresearch/hermes-agent:latest
 
+# Hermes CLI lives in its own venv inside the image; put it on PATH.
+ENV PATH="/opt/hermes/.venv/bin:$PATH"
+
 # Install Docker CLI so the orchestrator can spawn sub-agent containers
 # via the mounted host socket (/var/run/docker.sock).
 RUN apt-get update -qq && \
