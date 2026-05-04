@@ -1,22 +1,17 @@
 """
 Orchestrator tool: create_agent
 
-Allows the orchestrator Hermes agent to programmatically spin up a new
-sub-agent container and register it. Call this when the team needs a new
-area of expertise that no existing agent covers.
+Allows the orchestrator Hermes agent to programmatically create a new
+sub-agent profile so it can be assigned Kanban tasks immediately.
 
-After creation, tell the user to run:
-  orchestrator agent add <name>
-...or run the Hermes setup manually so the agent can accept tasks.
+Use this when the team needs a new area of expertise that no existing
+profile covers. The new profile is available to the Kanban dispatcher
+as soon as it is created — no restart required.
 """
 
 import json
 import os
-import subprocess
-import sys
-
-# The orchestrator container mounts the project at /workspace
-sys.path.insert(0, os.environ.get("PROJECT_DIR", "/workspace"))
+from pathlib import Path
 
 try:
     from orchestrator.config import load_config
@@ -32,28 +27,23 @@ except ImportError:
 
 
 def check_availability() -> bool:
-    if not _USE_PACKAGE:
-        return False
-    return subprocess.run(["docker", "info"], capture_output=True).returncode == 0
+    return _USE_PACKAGE
 
 
 def handle_create_agent(name: str, summary: str, **kwargs) -> str:
     if not _USE_PACKAGE:
-        return json.dumps({"error": "orchestrator package not available at /workspace"})
+        return json.dumps({"error": "orchestrator package not available"})
     try:
-        from pathlib import Path
         config = load_config(Path(os.environ.get("PROJECT_DIR", "/workspace")))
         manager = AgentManager(config)
         agent = manager.add_agent(name, summary)
         return json.dumps({
             "status": "created",
             "name": agent.name,
-            "port": agent.port,
-            "gateway": agent.gateway_url,
-            "profile": agent.profile_dir,
+            "profile_dir": agent.profile_dir,
             "next_step": (
-                f"Ask the user to initialise the Hermes profile so the agent can accept tasks: "
-                f"orchestrator agent add {agent.name}"
+                f"Profile '{agent.name}' is ready. "
+                f"Assign Kanban tasks to '{agent.name}' to delegate work to this agent."
             ),
         })
     except Exception as e:
@@ -63,9 +53,9 @@ def handle_create_agent(name: str, summary: str, **kwargs) -> str:
 schema = {
     "name": "create_agent",
     "description": (
-        "Spin up a new Hermes sub-agent container and register it with the orchestrator. "
-        "Use this only when the team needs new expertise that no current agent covers. "
-        "After creation, prompt the user to run 'orchestrator agent add <name>' to initialise the Hermes profile."
+        "Create a new sub-agent profile so it can be assigned Kanban tasks. "
+        "Use this only when the team needs a specialisation that no current profile covers. "
+        "After creation, assign tasks using `hermes kanban create --assignee <name>`."
     ),
     "parameters": {
         "type": "object",

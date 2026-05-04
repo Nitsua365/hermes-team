@@ -16,7 +16,6 @@ def agent() -> Agent:
     return Agent(
         name="test-agent",
         summary="A test agent",
-        port=8650,
         profile_dir="/tmp/agents/test-agent",
         created_at=datetime.now(timezone.utc),
     )
@@ -47,7 +46,6 @@ class TestPersistence:
         assert loaded is not None
         assert loaded.name == agent.name
         assert loaded.summary == agent.summary
-        assert loaded.port == agent.port
 
     def test_archived_survives_reload(self, tmp_path: Path, agent: Agent):
         r1 = AgentRegistry(tmp_path / "registry.json")
@@ -73,40 +71,20 @@ class TestArchiveAndRestore:
     def test_restore_appears_in_active(self, registry: AgentRegistry, agent: Agent):
         registry.add(agent)
         registry.archive("test-agent")
-        registry.restore("test-agent", 8651, "/tmp/agents/test-agent-new")
+        registry.restore("test-agent", "/tmp/agents/test-agent-new")
         assert registry.get("test-agent") is not None
 
     def test_restore_removes_from_archived(self, registry: AgentRegistry, agent: Agent):
         registry.add(agent)
         registry.archive("test-agent")
-        registry.restore("test-agent", 8651, "/tmp/agents/test-agent-new")
+        registry.restore("test-agent", "/tmp/agents/test-agent-new")
         assert registry.get_archived("test-agent") is None
 
-    def test_restore_updates_port(self, registry: AgentRegistry, agent: Agent):
+    def test_restore_updates_profile_dir(self, registry: AgentRegistry, agent: Agent):
         registry.add(agent)
         registry.archive("test-agent")
-        restored = registry.restore("test-agent", 8999, "/tmp/agents/test-agent")
-        assert restored.port == 8999
-
-
-class TestNextPort:
-    def test_returns_base_when_empty(self, registry: AgentRegistry):
-        assert registry.next_port(8650) == 8650
-
-    def test_skips_used_port(self, registry: AgentRegistry, agent: Agent):
-        registry.add(agent)  # port 8650
-        assert registry.next_port(8650) == 8651
-
-    def test_skips_multiple_used_ports(self, registry: AgentRegistry):
-        for i, port in enumerate([8650, 8651, 8652]):
-            registry.add(Agent(
-                name=f"agent-{i}",
-                summary="test",
-                port=port,
-                profile_dir=f"/tmp/{i}",
-                created_at=datetime.now(timezone.utc),
-            ))
-        assert registry.next_port(8650) == 8653
+        restored = registry.restore("test-agent", "/tmp/agents/test-agent-new")
+        assert restored.profile_dir == "/tmp/agents/test-agent-new"
 
 
 class TestAllActive:

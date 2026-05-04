@@ -10,7 +10,7 @@ services:
     ports:
       - "{port}:8642"
     volumes:
-      - {profile_dir}:/opt/data
+      - {data_dir}:/opt/data
       - /var/run/docker.sock:/var/run/docker.sock
       - .:/workspace
     environment:

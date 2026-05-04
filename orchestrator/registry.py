@@ -46,11 +46,10 @@ class AgentRegistry:
         self._archived[name] = agent
         self.save()
 
-    def restore(self, name: str, new_port: int, new_profile_dir: str) -> Agent:
+    def restore(self, name: str, new_profile_dir: str) -> Agent:
         agent = self._archived.pop(name)
-        agent.port = new_port
         agent.profile_dir = new_profile_dir
-        agent.status = "running"
+        agent.status = "active"
         self._active[name] = agent
         self.save()
         return agent
@@ -60,10 +59,3 @@ class AgentRegistry:
 
     def all_archived(self) -> list[Agent]:
         return list(self._archived.values())
-
-    def next_port(self, base: int = 8650) -> int:
-        used = {a.port for a in self._active.values()}
-        port = base
-        while port in used:
-            port += 1
-        return port

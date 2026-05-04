@@ -8,7 +8,6 @@ from click.testing import CliRunner
 from orchestrator.agent import Agent
 from orchestrator.cli import cli
 
-# Patch target for the init guard used by start / agent add
 _INIT_GUARD = "orchestrator.cli.already_initialized"
 
 
@@ -22,8 +21,7 @@ def agent() -> Agent:
     return Agent(
         name="test-agent",
         summary="A test agent",
-        port=9000,
-        profile_dir="/tmp/agents/test-agent",
+        profile_dir="/tmp/profiles/test-agent",
         created_at=datetime.now(timezone.utc),
     )
 
@@ -32,7 +30,6 @@ def _mock_manager(agent: Agent | None = None) -> MagicMock:
     m = MagicMock()
     m.config.orchestrator_port = 8642
     m.config.image = "test-image:latest"
-    m.config.agent_base_port = 9000
     m.registry.all_active.return_value = [agent] if agent else []
     if agent:
         m.get_agent.return_value = agent
@@ -77,7 +74,6 @@ class TestAgentAdd:
             )
         assert result.exit_code == 0
         assert "test-agent" in result.output
-        assert "9000" in result.output
 
     def test_prompts_for_summary_when_omitted(self, runner: CliRunner, agent: Agent):
         with patch(_INIT_GUARD, return_value=True), \
@@ -120,6 +116,18 @@ class TestAgentAdd:
             )
         assert result.exit_code == 1
         assert "orchestrator init" in result.output
+
+    def test_shows_profile_path(self, runner: CliRunner, agent: Agent):
+        with patch(_INIT_GUARD, return_value=True), \
+             patch("orchestrator.cli._manager") as mock_get:
+            m = _mock_manager(agent)
+            m.add_agent.return_value = agent
+            mock_get.return_value = m
+            result = runner.invoke(
+                cli, ["agent", "add", "test-agent", "--summary", "A test agent"]
+            )
+        assert "Profile" in result.output
+        assert "kanban-worker" in result.output
 
 
 # ── agent remove ───────────────────────────────────────────────────────────────
@@ -187,10 +195,10 @@ class TestAgentList:
             mock_get.return_value = _mock_manager()
             result = runner.invoke(cli, ["agent", "list"])
         assert result.exit_code == 0
-        assert "No active agents" in result.output
+        assert "No agent profiles" in result.output
 
 
-# ── goal set ───────────────────────────────────────────────────────────────────
+# ── goal commands ──────────────────────────────────────────────────────────────
 
 class TestGoalSet:
     def test_success(self, runner: CliRunner):
@@ -214,8 +222,6 @@ class TestGoalSet:
         assert result.exit_code == 1
 
 
-# ── goal list ──────────────────────────────────────────────────────────────────
-
 class TestGoalList:
     def test_shows_goals(self, runner: CliRunner, agent: Agent):
         agent.goals = ["Goal one", "Goal two"]
@@ -236,8 +242,6 @@ class TestGoalList:
         assert result.exit_code == 0
         assert "No goals" in result.output
 
-
-# ── goal clear ─────────────────────────────────────────────────────────────────
 
 class TestGoalClear:
     def test_success_with_confirmation(self, runner: CliRunner):

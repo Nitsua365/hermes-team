@@ -41,9 +41,23 @@ class TestValidateName:
 # ── add_agent ──────────────────────────────────────────────────────────────────
 
 class TestAddAgent:
-    def test_creates_profile_directory(self, manager: AgentManager, project_dir: Path):
+    def test_creates_profile_directory(self, manager: AgentManager, data_dir: Path):
         manager.add_agent("test-agent", "A test agent")
-        assert (project_dir / "agents" / "test-agent").is_dir()
+        assert (data_dir / "profiles" / "test-agent").is_dir()
+
+    def test_creates_memories_directory(self, manager: AgentManager, data_dir: Path):
+        manager.add_agent("test-agent", "A test agent")
+        assert (data_dir / "profiles" / "test-agent" / "memories").is_dir()
+
+    def test_writes_memory_with_role(self, manager: AgentManager, data_dir: Path):
+        manager.add_agent("test-agent", "Specialist in market trends")
+        memory = (data_dir / "profiles" / "test-agent" / "memories" / "MEMORY.md").read_text()
+        assert "Specialist in market trends" in memory
+
+    def test_installs_kanban_worker_skill(self, manager: AgentManager, data_dir: Path):
+        manager.add_agent("test-agent", "A test agent")
+        skill_path = data_dir / "profiles" / "test-agent" / "skills" / "kanban-worker" / "SKILL.md"
+        assert skill_path.exists()
 
     def test_registers_agent_in_registry(self, manager: AgentManager):
         manager.add_agent("test-agent", "A test agent")
@@ -52,19 +66,6 @@ class TestAddAgent:
     def test_stores_summary(self, manager: AgentManager):
         a = manager.add_agent("test-agent", "My summary")
         assert a.summary == "My summary"
-
-    def test_assigns_base_port_when_registry_empty(self, manager: AgentManager):
-        a = manager.add_agent("test-agent", "First")
-        assert a.port == manager.config.agent_base_port
-
-    def test_assigns_unique_ports_for_multiple_agents(self, manager: AgentManager):
-        a1 = manager.add_agent("agent-one", "First")
-        a2 = manager.add_agent("agent-two", "Second")
-        assert a1.port != a2.port
-
-    def test_calls_docker_run(self, manager: AgentManager, mock_docker: MagicMock):
-        manager.add_agent("test-agent", "A test agent")
-        mock_docker.run_agent.assert_called_once()
 
     def test_raises_if_name_already_exists(self, manager: AgentManager):
         manager.add_agent("test-agent", "First")
@@ -79,22 +80,16 @@ class TestAddAgent:
 # ── remove_agent ───────────────────────────────────────────────────────────────
 
 class TestRemoveAgent:
-    def test_archives_profile_directory(self, manager: AgentManager, project_dir: Path):
+    def test_archives_profile_directory(self, manager: AgentManager, data_dir: Path):
         manager.add_agent("test-agent", "A test agent")
         manager.remove_agent("test-agent")
-        assert (project_dir / "agents" / ".archive" / "test-agent").is_dir()
-        assert not (project_dir / "agents" / "test-agent").exists()
+        assert (data_dir / "profiles" / ".archive" / "test-agent").is_dir()
+        assert not (data_dir / "profiles" / "test-agent").exists()
 
     def test_removes_from_active_registry(self, manager: AgentManager):
         manager.add_agent("test-agent", "A test agent")
         manager.remove_agent("test-agent")
         assert manager.registry.get("test-agent") is None
-
-    def test_stops_and_removes_container(self, manager: AgentManager, mock_docker: MagicMock):
-        manager.add_agent("test-agent", "A test agent")
-        manager.remove_agent("test-agent")
-        mock_docker.stop.assert_called_with("test-agent")
-        mock_docker.remove.assert_called_with("test-agent")
 
     def test_raises_if_agent_not_found(self, manager: AgentManager):
         with pytest.raises(ValueError, match="not found"):
@@ -104,24 +99,17 @@ class TestRemoveAgent:
 # ── recover_agent ──────────────────────────────────────────────────────────────
 
 class TestRecoverAgent:
-    def test_restores_profile_directory(self, manager: AgentManager, project_dir: Path):
+    def test_restores_profile_directory(self, manager: AgentManager, data_dir: Path):
         manager.add_agent("test-agent", "A test agent")
         manager.remove_agent("test-agent")
         manager.recover_agent("test-agent")
-        assert (project_dir / "agents" / "test-agent").is_dir()
+        assert (data_dir / "profiles" / "test-agent").is_dir()
 
     def test_re_registers_in_active_registry(self, manager: AgentManager):
         manager.add_agent("test-agent", "A test agent")
         manager.remove_agent("test-agent")
         manager.recover_agent("test-agent")
         assert manager.registry.get("test-agent") is not None
-
-    def test_assigns_a_valid_port_on_recovery(self, manager: AgentManager):
-        manager.add_agent("test-agent", "A test agent")
-        manager.remove_agent("test-agent")
-        recovered = manager.recover_agent("test-agent")
-        assert isinstance(recovered.port, int)
-        assert recovered.port >= manager.config.agent_base_port
 
     def test_raises_if_no_archive_exists(self, manager: AgentManager):
         with pytest.raises(ValueError, match="No archive"):
@@ -131,37 +119,22 @@ class TestRecoverAgent:
 # ── set_goal ───────────────────────────────────────────────────────────────────
 
 class TestSetGoal:
-    def test_writes_goal_to_memory_file(self, manager: AgentManager, project_dir: Path):
+    def test_writes_goal_to_memory_file(self, manager: AgentManager, data_dir: Path):
         manager.add_agent("test-agent", "A test agent")
         manager.set_goal("test-agent", "Research market trends weekly")
-
-        memory_file = project_dir / "agents" / "test-agent" / "memories" / "MEMORY.md"
-        assert memory_file.exists()
+        memory_file = data_dir / "profiles" / "test-agent" / "memories" / "MEMORY.md"
         assert "Research market trends weekly" in memory_file.read_text()
-
-    def test_creates_memories_directory(self, manager: AgentManager, project_dir: Path):
-        manager.add_agent("test-agent", "A test agent")
-        manager.set_goal("test-agent", "A goal")
-        assert (project_dir / "agents" / "test-agent" / "memories").is_dir()
 
     def test_stores_goal_in_registry(self, manager: AgentManager):
         manager.add_agent("test-agent", "A test agent")
         manager.set_goal("test-agent", "Research market trends weekly")
         assert "Research market trends weekly" in manager.registry.get("test-agent").goals
 
-    def test_multiple_goals_accumulate_in_registry(self, manager: AgentManager):
+    def test_multiple_goals_accumulate(self, manager: AgentManager):
         manager.add_agent("test-agent", "A test agent")
         manager.set_goal("test-agent", "Goal one")
         manager.set_goal("test-agent", "Goal two")
         assert len(manager.registry.get("test-agent").goals) == 2
-
-    def test_multiple_goals_appear_in_memory_file(self, manager: AgentManager, project_dir: Path):
-        manager.add_agent("test-agent", "A test agent")
-        manager.set_goal("test-agent", "Goal one")
-        manager.set_goal("test-agent", "Goal two")
-        text = (project_dir / "agents" / "test-agent" / "memories" / "MEMORY.md").read_text()
-        assert "Goal one" in text
-        assert "Goal two" in text
 
     def test_raises_if_agent_not_found(self, manager: AgentManager):
         with pytest.raises(ValueError, match="not found"):
@@ -177,13 +150,11 @@ class TestClearGoals:
         manager.clear_goals("test-agent")
         assert manager.registry.get("test-agent").goals == []
 
-    def test_removes_goals_section_from_memory_file(
-        self, manager: AgentManager, project_dir: Path
-    ):
+    def test_removes_goals_from_memory_file(self, manager: AgentManager, data_dir: Path):
         manager.add_agent("test-agent", "A test agent")
         manager.set_goal("test-agent", "Goal to remove")
         manager.clear_goals("test-agent")
-        memory_file = project_dir / "agents" / "test-agent" / "memories" / "MEMORY.md"
+        memory_file = data_dir / "profiles" / "test-agent" / "memories" / "MEMORY.md"
         if memory_file.exists():
             assert "Goal to remove" not in memory_file.read_text()
 
@@ -207,10 +178,10 @@ class TestAddGoalHelper:
         assert "Second goal" in result
 
     def test_preserves_existing_memory_content(self):
-        content = "## Environment\n- macOS 14\n"
+        content = "## Role\nResearcher\n"
         result = _add_goal(content, "New goal")
-        assert "## Environment" in result
-        assert "macOS 14" in result
+        assert "## Role" in result
+        assert "Researcher" in result
 
     def test_does_not_duplicate_header(self):
         content = "## Orchestrator Goals\n- Existing\n"
@@ -220,18 +191,18 @@ class TestAddGoalHelper:
 
 class TestRemoveGoalsSectionHelper:
     def test_removes_goals_section(self):
-        content = "## Other\n- item\n\n## Orchestrator Goals\n- goal1\n- goal2\n"
+        content = "## Role\n- item\n\n## Orchestrator Goals\n- goal1\n- goal2\n"
         result = _remove_goals_section(content)
         assert "## Orchestrator Goals" not in result
         assert "goal1" not in result
 
     def test_preserves_other_sections(self):
-        content = "## Environment\n- macOS\n\n## Orchestrator Goals\n- a goal\n"
+        content = "## Role\nResearcher\n\n## Orchestrator Goals\n- a goal\n"
         result = _remove_goals_section(content)
-        assert "## Environment" in result
-        assert "macOS" in result
+        assert "## Role" in result
+        assert "Researcher" in result
 
     def test_safe_on_content_with_no_goals(self):
-        content = "## Environment\n- macOS\n"
+        content = "## Role\nResearcher\n"
         result = _remove_goals_section(content)
-        assert "## Environment" in result
+        assert "## Role" in result

@@ -3,19 +3,26 @@ import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
-import httpx
-
 from .agent import Agent
 from .config import Config
 from .docker import DockerClient
 from .registry import AgentRegistry
-
-
-class DelegationError(Exception):
-    pass
+from .scaffold import _SCAFFOLD_DIR
 
 _GOALS_HEADER = "## Orchestrator Goals"
 _NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9\-]*[a-z0-9])?$")
+
+_ROLE_TEMPLATE = """\
+## Role
+{summary}
+
+## Working Style
+You are a specialist sub-agent in an orchestrated AI team. Tasks arrive via the
+Kanban board. At the start of every session call kanban_show() to read the task
+details and any output passed from parent tasks. Execute the work using your
+available tools, then call kanban_complete() with a specific, detailed summary
+so that downstream agents have everything they need to continue.
+"""
 
 
 class AgentManager:
@@ -27,18 +34,18 @@ class AgentManager:
     # ── orchestrator ─────────────────────────────────────────────────────────
 
     def start_orchestrator(self) -> None:
+        self.config.data_dir.mkdir(parents=True, exist_ok=True)
+        self.config.profiles_dir.mkdir(parents=True, exist_ok=True)
+
         self.docker.compose_build(str(self.config.compose_file))
         self.docker.compose_up(str(self.config.compose_file))
 
-        profile = self.config.orchestrator_profile
-        profile.mkdir(parents=True, exist_ok=True)
-
-        sentinel = profile / ".initialized"
+        sentinel = self.config.data_dir / ".initialized"
         if not sentinel.exists():
-            self.docker.setup_interactive(str(profile), self.config.image)
+            self.docker.setup_interactive(str(self.config.data_dir), self.config.image)
             sentinel.touch()
 
-    # ── agents ────────────────────────────────────────────────────────────────
+    # ── agents (profiles) ─────────────────────────────────────────────────────
 
     def add_agent(self, name: str, summary: str) -> Agent:
         _validate_name(name)
@@ -46,16 +53,20 @@ class AgentManager:
         if self.registry.get(name):
             raise ValueError(f"Agent '{name}' already exists.")
 
-        profile_dir = self.config.agents_dir / name
+        profile_dir = self.config.profiles_dir / name
         profile_dir.mkdir(parents=True, exist_ok=True)
 
-        port = self.registry.next_port(self.config.agent_base_port)
-        self.docker.run_agent(name, port, str(profile_dir), self.config.image)
+        # Initialise MEMORY.md with role definition
+        memories_dir = profile_dir / "memories"
+        memories_dir.mkdir(exist_ok=True)
+        (memories_dir / "MEMORY.md").write_text(_ROLE_TEMPLATE.format(summary=summary))
+
+        # Install kanban-worker skill so the dispatcher can spawn this profile
+        self._install_skill(profile_dir, "kanban-worker")
 
         agent = Agent(
             name=name,
             summary=summary,
-            port=port,
             profile_dir=str(profile_dir),
             created_at=datetime.now(timezone.utc),
         )
@@ -65,10 +76,7 @@ class AgentManager:
     def remove_agent(self, name: str) -> None:
         agent = self.get_agent(name)
 
-        self.docker.stop(name)
-        self.docker.remove(name)
-
-        archive = self.config.agents_dir / ".archive" / name
+        archive = self.config.profiles_dir / ".archive" / name
         archive.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(Path(agent.profile_dir)), str(archive))
 
@@ -79,31 +87,18 @@ class AgentManager:
         if not archived:
             raise ValueError(f"No archive found for '{name}'.")
 
-        archive = self.config.agents_dir / ".archive" / name
+        archive = self.config.profiles_dir / ".archive" / name
         if not archive.exists():
             raise ValueError(f"Archive directory missing: {archive}")
 
-        profile_dir = self.config.agents_dir / name
+        profile_dir = self.config.profiles_dir / name
         shutil.move(str(archive), str(profile_dir))
 
-        port = self.registry.next_port(self.config.agent_base_port)
-        self.docker.run_agent(name, port, str(profile_dir), self.config.image)
-
-        return self.registry.restore(name, port, str(profile_dir))
+        return self.registry.restore(name, str(profile_dir))
 
     # ── goals ─────────────────────────────────────────────────────────────────
 
     def set_goal(self, agent_name: str, goal: str) -> None:
-        """
-        Persist a goal for a sub-agent by writing it to their MEMORY.md.
-
-        Hermes injects MEMORY.md into every session's system prompt, so the
-        goal is active from the agent's next conversation onward without
-        requiring a container restart.
-
-        This mirrors hermes' own /goal mechanism: goals survive across sessions
-        and the agent is aware of them at the start of each turn.
-        """
         agent = self.get_agent(agent_name)
 
         memory_dir = Path(agent.profile_dir) / "memories"
@@ -126,48 +121,6 @@ class AgentManager:
         agent.goals = []
         self.registry.update(agent)
 
-    # ── delegation ────────────────────────────────────────────────────────────
-
-    def delegate_task(self, agent_name: str, message: str) -> dict:
-        """
-        Send a task to a sub-agent's Hermes gateway and return the response.
-
-        Posts to the agent's OpenAI-compatible /v1/chat/completions endpoint
-        and blocks until the agent replies or the 120s timeout expires.
-        Raises DelegationError on network failure or non-2xx response.
-        """
-        agent = self.get_agent(agent_name)
-        try:
-            with httpx.Client(timeout=120) as client:
-                resp = client.post(
-                    f"{agent.gateway_url}/v1/chat/completions",
-                    json={
-                        "model": "hermes",
-                        "messages": [{"role": "user", "content": message}],
-                    },
-                )
-                resp.raise_for_status()
-                return resp.json()
-        except httpx.HTTPStatusError as e:
-            raise DelegationError(
-                f"Agent '{agent_name}' returned {e.response.status_code}"
-            ) from e
-        except httpx.RequestError as e:
-            raise DelegationError(
-                f"Could not reach agent '{agent_name}': {e}"
-            ) from e
-
-    def routing_candidates(self) -> list[dict]:
-        """
-        Return all active agents as routing candidates for the orchestrator.
-        Each entry contains the name, summary, and gateway_url so the
-        orchestrator can decide which agent to delegate to.
-        """
-        return [
-            {"name": a.name, "summary": a.summary, "gateway_url": a.gateway_url}
-            for a in self.registry.all_active()
-        ]
-
     # ── helpers ───────────────────────────────────────────────────────────────
 
     def get_agent(self, name: str) -> Agent:
@@ -176,8 +129,14 @@ class AgentManager:
             raise ValueError(f"Agent '{name}' not found.")
         return agent
 
+    def _install_skill(self, profile_dir: Path, skill_name: str) -> None:
+        src = _SCAFFOLD_DIR / "skills" / skill_name
+        dst = profile_dir / "skills" / skill_name
+        if src.exists() and not dst.exists():
+            shutil.copytree(str(src), str(dst))
 
-# ── pure functions (testable without side-effects) ────────────────────────────
+
+# ── pure functions ────────────────────────────────────────────────────────────
 
 def _validate_name(name: str) -> None:
     if not _NAME_RE.match(name):
@@ -190,8 +149,6 @@ def _validate_name(name: str) -> None:
 def _add_goal(content: str, goal: str) -> str:
     line = f"- {goal}"
     if _GOALS_HEADER in content:
-        # Insert the new goal line right after the last existing goal bullet,
-        # or directly after the header if there are none yet.
         pattern = rf"({re.escape(_GOALS_HEADER)}\n(?:- [^\n]*\n)*)"
         replacement = lambda m: m.group(1) + line + "\n"
         updated = re.sub(pattern, replacement, content, count=1)

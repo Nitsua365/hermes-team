@@ -41,11 +41,7 @@ def cli() -> None:
 @cli.command()
 @click.option("--force", is_flag=True, default=False, help="Overwrite existing files.")
 def init(force: bool) -> None:
-    """Scaffold a new orchestrator project in the current directory.
-
-    Creates Dockerfile, docker-compose.yml, tools/, skills/, and agents/
-    so you can run `orchestrator start` from this directory.
-    """
+    """Scaffold a new orchestrator project in the current directory."""
     project_dir = Path.cwd()
     try:
         created = init_project(project_dir, force=force)
@@ -59,9 +55,9 @@ def init(force: bool) -> None:
 
     console.print(
         f"\n[bold]Next steps:[/bold]\n"
-        f"  1. [cyan]orchestrator start[/cyan]  — build the image and launch the orchestrator\n"
-        f"  2. [cyan]orchestrator chat[/cyan]   — open the Hermes UI in your browser\n"
-        f"  3. [cyan]orchestrator agent add <name>[/cyan]  — add a sub-agent\n"
+        f"  1. [cyan]orchestrator start[/cyan]         — build the image and launch the orchestrator\n"
+        f"  2. [cyan]orchestrator chat[/cyan]           — open the Hermes UI in your browser\n"
+        f"  3. [cyan]orchestrator agent add <name>[/cyan] — register a sub-agent profile\n"
     )
 
 
@@ -102,7 +98,7 @@ def chat() -> None:
 
 @cli.group()
 def agent() -> None:
-    """Manage sub-agents."""
+    """Manage sub-agent profiles."""
 
 
 @agent.command("add")
@@ -113,69 +109,71 @@ def agent() -> None:
     help="What this agent specialises in.",
 )
 def agent_add(name: str, summary: str) -> None:
-    """Spin up a new sub-agent container and register it."""
+    """Create a new sub-agent profile and register it."""
     _require_init()
     m = _manager()
     try:
         a = m.add_agent(name, summary)
-    except (ValueError, DockerError) as e:
+    except (ValueError, OSError) as e:
         err_console.print(f"[red]Error:[/red] {e}")
         sys.exit(1)
 
-    console.print(f"\n[green]✓[/green] Agent [bold]{a.name}[/bold] started")
-    console.print(f"  Gateway : {a.gateway_url}")
+    console.print(f"\n[green]✓[/green] Agent profile [bold]{a.name}[/bold] created")
     console.print(f"  Profile : {a.profile_dir}")
+    console.print(f"  Skill   : kanban-worker installed")
     console.print(
-        f"\nInitialise Hermes profile:\n"
-        f"  docker run -it --rm -v {a.profile_dir}:/opt/data {m.config.image} setup"
+        f"\nThe dispatcher will spawn [bold]{a.name}[/bold] automatically "
+        f"when a Kanban task is assigned to it.\n"
+        f"Run [cyan]orchestrator chat[/cyan] to tell the orchestrator about this new team member."
     )
 
 
 @agent.command("remove")
 @click.argument("name")
-@click.confirmation_option(prompt="Stop container and archive this agent's profile?")
+@click.confirmation_option(prompt="Archive this agent's profile?")
 def agent_remove(name: str) -> None:
-    """Stop a sub-agent and archive its profile (recoverable)."""
+    """Archive a sub-agent profile (recoverable)."""
     m = _manager()
     try:
         m.remove_agent(name)
-    except (ValueError, DockerError) as e:
+    except (ValueError, OSError) as e:
         err_console.print(f"[red]Error:[/red] {e}")
         sys.exit(1)
-    console.print(f"[green]✓[/green] Agent [bold]{name}[/bold] removed. Profile archived.")
+    console.print(f"[green]✓[/green] Agent [bold]{name}[/bold] archived.")
 
 
 @agent.command("recover")
 @click.argument("name")
 def agent_recover(name: str) -> None:
-    """Restore an archived agent and restart its container."""
+    """Restore an archived agent profile."""
     m = _manager()
     try:
         a = m.recover_agent(name)
-    except (ValueError, DockerError) as e:
+    except (ValueError, OSError) as e:
         err_console.print(f"[red]Error:[/red] {e}")
         sys.exit(1)
-    console.print(f"[green]✓[/green] Agent [bold]{a.name}[/bold] recovered at {a.gateway_url}")
+    console.print(f"[green]✓[/green] Agent [bold]{a.name}[/bold] restored at {a.profile_dir}")
 
 
 @agent.command("list")
 def agent_list() -> None:
-    """List all active agents."""
+    """List all active agent profiles."""
     m = _manager()
     agents = m.registry.all_active()
     if not agents:
-        console.print("No active agents. Add one with: [bold]orchestrator agent add <name>[/bold]")
+        console.print(
+            "No agent profiles. Add one with: [bold]orchestrator agent add <name>[/bold]"
+        )
         return
 
     table = Table(show_header=True, header_style="bold cyan")
     table.add_column("Name")
     table.add_column("Summary")
-    table.add_column("Port", justify="right")
     table.add_column("Goals", justify="right")
     table.add_column("Status")
 
     for a in agents:
-        table.add_row(a.name, a.summary, str(a.port), str(len(a.goals)), a.status)
+        table.add_row(a.name, a.summary, str(len(a.goals)), a.status)
 
     console.print(table)
 
@@ -187,7 +185,7 @@ def goal() -> None:
     """Manage persistent goals for a sub-agent.
 
     Goals are written to the agent's MEMORY.md and injected into every Hermes
-    session automatically — no container restart required.
+    session automatically — no restart required.
     """
 
 
