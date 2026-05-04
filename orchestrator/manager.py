@@ -40,7 +40,9 @@ class AgentManager:
         self.docker.compose_build(str(self.config.compose_file))
         self.docker.compose_up(str(self.config.compose_file))
 
-        sentinel = self.config.data_dir / ".initialized"
+        # Sentinel lives in project_dir (user-writable), not data_dir
+        # (which Docker may have created as root on first run).
+        sentinel = self.config.project_dir / ".hermes-data-initialized"
         if not sentinel.exists():
             self.docker.setup_interactive(str(self.config.data_dir), self.config.image)
             sentinel.touch()

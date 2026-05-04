@@ -13,4 +13,4 @@ if [[ -d /opt/hermes-builtin/skills ]]; then
   cp -rn /opt/hermes-builtin/skills/. /opt/data/skills/
 fi
 
-exec hermes "$@"
+exec /opt/hermes/.venv/bin/hermes "$@"
