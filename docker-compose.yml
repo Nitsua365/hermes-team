@@ -15,4 +15,4 @@ services:
       - .:/workspace
     environment:
       - PROJECT_DIR=/workspace
-    shm_size: "3g"
+    shm_size: "20g"
